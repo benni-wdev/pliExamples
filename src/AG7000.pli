@@ -1,0 +1,180 @@
+ AG7000 : Procedure options (main) ;
+    dcl DDIN1 file record input;
+    dcl DDIN2 file record input;
+    dcl DDOUT file record output;
+    dcl (eof1, eof2) bit(1) init ('0'b);
+    on endfile(DDIN1) eof1 = '1'b;
+    on endfile(DDIN2) eof2 = '1'b;
+
+    dcl firstPart bit(1) init('1'b);
+    dcl conversionchar char(10) init('');
+    on conversion begin;
+       onsource='0';
+       if(firstPart) then
+          call error('a');
+       else
+          call error('b');
+    end;
+  
+    define alias decimal1 dec fixed(9,3);
+
+    dcl readP ptr;       
+    dcl tempErtrag Type decimal1;
+    dcl tmpEumsatz dec fixed(11,3);
+    dcl tmpEertrag dec fixed(11,3);
+
+    dcl recordcounter bin fixed(31) init('0'b);
+
+
+    dcl 1 in_Festabgabe based(readP),
+          2 ID char(8),
+          2 Menge pic'999999999v',
+          2 Preis pic'999999v.999',
+          2 KomRetro pic's99v.999999';
+
+    dcl 1 in_Eindeckung based(readP),
+          2 Auftragtyp char(1),
+          2 ID char(8) init(''),
+          2 KtoNr char(16),
+          2 Menge pic'999999999v',
+          2 Preis pic'999999v.999',
+          2 KomRetro pic's99v.999999';
+
+    dcl 1 o_Ertraege,
+          2 Stufe char(1),
+          2 ID char(8),
+          2 Menge pic'999999999v',
+          2 Ertrag pic's99999v.999',
+          2 er char(1) init(' ');
+
+
+    open file(DDIN1);
+    open file(DDOUT);
+    read file(DDIN1) set(readP);
+    recordcounter+=1;
+    if(eof1)then do; 
+       call info('a');
+    end;
+    do while (^eof1);
+
+
+       o_Ertraege.Stufe='1';
+       o_Ertraege.ID=in_Festabgabe.ID;
+       /******************************
+          Damaged Files erkennen
+          (pic kanns nicht)
+        ******************************/
+       conversionchar=in_Festabgabe.Menge;
+       o_Ertraege.Menge=conversionchar;
+       conversionchar='';
+       conversionchar=in_Festabgabe.Preis;
+       in_Festabgabe.Preis=conversionchar;
+       conversionchar='';
+       conversionchar=in_festabgabe.KomRetro;
+       in_festabgabe.KomRetro=conversionchar;
+       conversionchar='';
+       /******************************
+
+        ******************************/
+       tempErtrag=berechneertrag(in_Festabgabe.Preis,
+                   in_festabgabe.KomRetro);
+       tempErtrag*=-1;
+       o_Ertraege.er='e';
+       o_Ertraege.Ertrag=tempErtrag;
+       write file(DDOUT) from(o_Ertraege);
+       read file(DDIN1) set(readP);
+       recordcounter+=1;
+    end;
+    o_ertraege.er=' ';
+
+    close file(DDIN1);
+    firstPart='0'b;
+    open file(DDIN2);
+    read file(DDIN2) set(readP);
+    recordcounter=0;
+    if(eof2)then do;    
+       call info('b');
+    end;
+    do while (^eof2);
+      o_Ertraege.ID=in_Eindeckung.ID;
+      o_Ertraege.Menge=in_Eindeckung.Menge;
+      if (in_Eindeckung.Auftragtyp='K') then do;
+         /* Operation 8,4,7 */
+          o_Ertraege.Stufe='1';
+          tempErtrag=berechneertrag(in_Eindeckung.Preis,
+                   in_Eindeckung.KomRetro);
+          o_Ertraege.Ertrag=tempErtrag;
+      end;
+
+      else do;
+         /* Operation 8,4,7 */
+          o_Ertraege.Stufe='9';
+          tempErtrag=berechneertrag(in_Eindeckung.Preis,
+                   in_Eindeckung.KomRetro);
+          o_Ertraege.Ertrag=tempErtrag;
+          if (in_Eindeckung.Auftragtyp='E') then do;
+             o_Ertraege.Ertrag*=-1;
+          End;
+
+      end;
+      write file(DDOUT) from(o_Ertraege);
+      read file(DDIN2) set(readP);
+      recordcounter+=1;
+   end;
+   /* Operation 9 */
+   close file(DDIN2);
+   close file(DDOUT);
+
+   /*Funktion zur Ertragsberechnung*/
+   berechneertrag:proc($preis,$KomRetro) returns (dec fixed(9,3));
+      dcl $preis Type decimal1;
+      dcl $KomRetro dec fixed(9,6);
+      dcl ergebnis Type decimal1;
+      ergebnis=$preis*0.01*$KomRetro;
+      return(ergebnis);
+   end berechneertrag;
+
+  Info:proc($e);
+   dcl $e char(1);
+   select ($e) ;
+    when ('a') do;
+       put("Info: file DDIN1 is empty") skip;
+    end;
+    when ('b') do;
+       put("Info: file DDIN2 is empty") skip;
+    end;
+    when ('') do;
+
+    end;
+    when ('') do;
+
+    end;
+    otherwise do;
+       put("Info: Unidentified Info Code") skip;
+    end;
+   End;
+  End Info;
+
+  Error:proc($e);
+   dcl $e char(1);
+   select ($e) ;
+    when ('a') do;
+       put('Error: file DDIN1 is damaged on line:'||recordcounter) skip;
+    end;
+    when ('b') do;
+       put('Error: file DDIN2 is damaged on line:'||recordcounter) skip;
+    end;
+    when ('') do;
+
+    end;
+    when ('') do;
+
+    end;
+    otherwise do;
+       put("Error: Unidentified Error Code") skip;
+    end;
+   END;
+   SIGNAL ERROR;
+  End Error;
+ End  AG7000 ;
+

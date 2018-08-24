@@ -1,0 +1,169 @@
+ Bucketsort : Procedure options (main) ;
+    dcl ddin file record input;
+    dcl ddout file record output;
+    dcl eof bit(1) init('0'b);
+    on endfile(DDIN) eof='1'b;
+    dcl Readptr ptr;
+
+    dcl cnt bin fixed(31) init('0'b);
+    dcl i bin fixed(31);
+    dcl j bin fixed(31);
+    dcl k bin fixed(31);
+    dcl l bin fixed(31);
+
+    define structure    1 sort,
+          2 next HANDLE sort,
+          2 Stufe char(1),
+          2 ID1 char(2),
+          2 ID2 char(2),
+          2 ID3 char(2),
+          2 ID4 char(2),
+          2 anzahl pic'999999999V',
+          2 ertrag pic's99999V.999',
+          2 er char(1);
+
+    dcl (firstH,actualH,tmpH) HANDLE sort;
+
+    dcl 1 instruct based(Readptr),
+          2 Stufe char(1),
+          2 ID1 char(2),
+          2 ID2 char(2),
+          2 ID3 char(2),
+          2 ID4 char(2),
+          2 anzahl pic'999999999V',
+          2 ertrag pic's99999V.999',
+          2 er char(1);
+
+
+    dcl 1 out,
+         2 Stufe char(1),
+          2 ID1 char(2),
+          2 ID2 char(2),
+          2 ID3 char(2),
+          2 ID4 char(2),
+          2 anzahl pic'999999999V',
+          2 ertrag pic's99999V.999',
+          2 er char(1);
+
+    dcl bucket(2,cnt) HANDLE sort ctl;
+    dcl cnter(2) bin fixed(31) init( '0'b,'0'b);
+    dcl bucnt char(2) init('00');
+    dcl sekcnt char(2) init('00');
+    dcl mitcnt char(2) init('00');
+
+    dcl business dec fixed(2);
+    dcl sektor dec fixed(2);
+    dcl mitarbeiter dec fixed(2);
+    dcl bucket4(business+1,sektor+1,mitarbeiter+1,cnter(1))
+          HANDLE sort ctl;
+    dcl cnter4(business+1,sektor+1,mitarbeiter+1) bin fixed(31) ctl;
+
+    dcl tmpb dec fixed(2);
+    dcl tmps dec fixed(2);
+    dcl tmpm dec fixed(2);
+
+    open file(DDIN);
+
+    /***********************
+       Fill sort from File
+     ***********************/
+    read file(DDIN) set(Readptr);
+    cnt+=1;
+    if(^eof) then do;
+       firstH=new(:sort:);
+       actualH=firstH;
+    end;
+    do while(^eof);
+       call copyS(actualH);
+       tmpH=new(:sort:);
+       actualH=> sort.next=tmpH;
+       actualH=tmpH;
+       read file(DDIN) set(Readptr);
+       cnt+=1;
+       if(eof)  then do;
+         actualH=>sort.Stufe='X';
+         cnt-=1;
+       End;
+    end;
+    close file(DDIN);
+    open file(DDOUT);
+    /***********************
+       Sort 
+    ***********************/
+    alloc bucket;
+    actualH=firstH;
+    do while(actualH=> sort.Stufe ^='X');
+        if(actualH=> sort.Stufe='1') then do;
+             cnter(1)+=1;
+             bucket(1,cnter(1))=actualH;
+             if(actualH=> sort.ID2>bucnt) then do;
+                bucnt=actualH=> sort.ID2;
+             End;
+             if(actualH=> sort.ID3>sekcnt) then do;
+                sekcnt=actualH=> sort.ID3;
+             End;
+             if(actualH=> sort.ID4>mitcnt) then do;
+                mitcnt=actualH=> sort.ID4;
+             End;
+        end;
+        if(actualH=> sort.Stufe='9') then do;
+             cnter(2)+=1;
+             bucket(2,cnter(2))=actualH;
+        end;
+        actualH=(actualH=> sort.next);
+    End;
+    business=bucnt;
+    sektor=sekcnt;
+    mitarbeiter=mitcnt;
+    alloc bucket4;
+    alloc cnter4;
+    cnter4(*)='0'b;
+    do i=1 to cnter(1);
+       tmpb=bucket(1,i)=>sort.ID2;
+       tmps=bucket(1,i)=>sort.ID3;
+       tmpm=bucket(1,i)=>sort.ID4;
+       cnter4(tmpb+1,tmps+1,tmpm+1)+=1;
+       bucket4(tmpb+1,tmps+1,tmpm+1,cnter4(tmpb+1,tmps+1,tmpm+1))
+             =bucket(1,i);
+    End;
+    do i=1 to business+1;
+       do j=1 to sektor+1;
+          do k=1 to mitarbeiter+1;
+             do l=1 to cnter4(i,j,k);
+                if(bucket4(i,j,k,l)^=null()) then do;
+                   call copyB(bucket4(i,j,k,l));
+                   write file(DDOUT) from(out);
+                End;
+             End;
+          End;
+       End;
+    End;
+    do i=1 to cnter(2);
+       call copyB(bucket(2,i));
+       write file(DDOUT) from(out);
+    End;
+    close file(DDOUT);
+    copyS:proc($sort1);
+       dcl $sort1 HANDLE sort;
+       $sort1=> sort.Stufe=instruct.Stufe;
+       $sort1=> sort.ID1=instruct.ID1;
+       $sort1=> sort.ID2=instruct.ID2;
+       $sort1=> sort.ID3=instruct.ID3;
+       $sort1=> sort.ID4=instruct.ID4;
+       $sort1=> sort.anzahl=instruct.anzahl;
+       $sort1=> sort.ertrag=instruct.ertrag;
+       $sort1=> sort.er=instruct.er;
+    end copyS;
+
+    copyB:proc($sort1);
+       dcl $sort1 HANDLE sort;
+       out.Stufe=$sort1=> sort.Stufe;
+       out.ID1=$sort1=> sort.ID1;
+       out.ID2=$sort1=> sort.ID2;
+       out.ID3=$sort1=> sort.ID3;
+       out.ID4=$sort1=> sort.ID4;
+       out.anzahl=$sort1=> sort.anzahl;
+       out.ertrag=$sort1=> sort.ertrag;
+       out.er=$sort1=> sort.er;
+    end copyB;
+ End  Bucketsort;

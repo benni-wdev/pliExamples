@@ -1,0 +1,771 @@
+ AG7010 : Procedure options (main) ;
+   dcl DDIN file record input;
+   dcl DDOUT2 file record output env(ctlasa);
+   dcl eof bit (1) init('0'b);
+   on endfile(DDIN) eof ='1'b;
+   dcl readP ptr;
+   /********************************
+    ********************************
+           Output Strukturen
+    ********************************
+    ********************************/
+
+   /********************************
+                 Kopf
+    ********************************/
+    dcl 1 titelzeile1,
+         2 asa char(1) init('1'),
+         2 Ertragsliste char(12) init('Ertragsliste'),
+         2 i1 char(40) init((40)' '),
+         2 datum char(10),
+         2 i2 char(5) init((5)' '),
+         2 Seite char(5) init('Seite '),
+         2 SeitenNr pic'Z9',
+         2 von char(5) init(' von '),
+         2 SeitenMax pic'Z9';
+
+    dcl strich char(83) init(' '||(82)'-');
+
+    dcl 1 Legende,
+          2 asa char(1) init(' '),
+          2 i1 char(30) init((30) ' '),
+          2 Umsatz char(6) init('Umsatz'),
+          2 i2 char(19)  init((19) ' '),
+          2 Ertrag char(6) init ('Ertrag'),
+          2 i3 char(21) init((21)' ');
+   /********************************
+          Business Überschrift
+    ********************************/
+    dcl 1 bbue,
+          2 asa char(1),
+          2 bu char(13) init('Businessunit '),
+          2 nr char(2),
+          2 i1  char(67) init((67)' ');
+   /********************************
+          Sektor Überschrift
+    ********************************/
+    dcl 1 bsue,
+          2 asa char(1),
+          2 bu char(9) init('  Sektor '),
+          2 nr char(2),
+          2 i1  char(71) init((71)' ');
+   /********************************
+        Anlageberater Unterstrich
+    ********************************/
+    dcl 1 anstrich ,
+          2 asa char(1) init(' '),
+          2 i1 char(23) init((23)' '),
+          2 strich char(14) init((14)' '),
+          2 i2 char(11) init((14)' '),
+          2 strich2 char(15) init((15)' '),
+          2 i3  char(20) init((20)' ');
+   /********************************
+          Sektor Total
+    ********************************/
+    dcl 1 stotstrich ,
+          2 asa char(1) init(' '),
+          2 i1 char(23) init((23)' '),
+          2 strich1 char(14) init((14)' '),
+          2 i2 char(11) init((11)' '),
+          2 strich2 char(15) init((15)' '),
+          2 i3  char(20) init((20)' ');
+
+    dcl 1 bstot,
+          2 asa char(1) init('0'),
+          2 totalBu char(15) init('  Total Sektor '),
+          2 nr char(2),
+          2 i1 char(6) init((6)' '),
+          2 umsatztot type picumsatz,
+          2 i2  char(11) init((11)' '),
+          2 ertragtot type picertrag,
+          2 i3  char(20) init((20)' ');
+
+   /********************************
+          Business Total
+    ********************************/
+    dcl 1 btotstrich ,
+          2 asa char(1) init(' '),
+          2 i1 char(36) init((36)' '),
+          2 strich1 char(14) init((14)' '),
+          2 i2 char(17) init((17)' '),
+          2 strich2 char(15) init((15)' ');
+
+    dcl 1 bbtot,
+          2 asa char(1) init('0'),
+          2 totalBu char(15) init('Total Business '),
+          2 nr char(2),
+          2 i1 char(19) init((19)' '),
+          2 umsatztot type picumsatz,
+          2 i2  char(17) init((17)' '),
+          2 ertragtot type picertrag;
+   /********************************
+         Emissionshandel Total
+    ********************************/
+    dcl 1 emiout,
+        2 asa char(1) init('0'),
+        2 name char(15) init('Emissionshandel'),
+        2 i1 char(8) init((8)' '),
+        2 umsatz type picumsatz,
+        2 i2 char(30) init((30)' '),
+        2 ertrag type picertrag;
+   /********************************
+         Gesamtbetrag Fusszeile
+    ********************************/
+    dcl strichfuss char(83)  init('0'||(82)'=');
+
+    dcl 1 Fusszeile,
+          2 asa char(1) init(' '),
+          2 GE char(12) init('Gesamtertrag'),
+          2 i1 char(55) init((55)' '),
+          2 ertrag type picertrag;
+
+   /********************************
+    ********************************
+    ********************************
+    ********************************
+    ********************************
+    ********************************/
+   dcl (firstH,actual) handle memrecord;
+   dcl tmphandle handle memrecord;
+
+   dcl recordcounter bin fixed(31) init('0'b);
+   dcl (translate,sysnull,substr,date) builtin;
+
+   on conversion begin;
+       onsource='0';
+       call error('b');
+   end;
+
+   /********************************
+   *********************************/
+   define alias sz dec fixed(3);
+   define alias daertrag dec fixed(15,3);
+   define alias daumsatz dec fixed(15,3);
+   define alias picertrag pic'sss,sss,ss9v.999'; /*12 */
+   define alias picumsatz pic'ZZZ,ZZZ,ZZ9V.99';  /*10 */
+   /********************************
+   *********************************/
+
+   dcl emumsatz type daumsatz init(0);
+   dcl direktumsatz type daumsatz init(0);
+
+   /********************************
+   *********************************/
+   dcl maxzeilen type sz value(60);
+   dcl anzahlzeilen type sz;
+   dcl anzahlseiten type sz init(0);
+   dcl tmpzeilen type sz;
+   dcl tmpseiten type sz;
+   /********************************
+   *********************************/
+   /********************************
+       Gesamtsummen Umsatz Ertrag
+   *********************************/
+   dcl anzahlBU bin fixed(31);
+   dcl anzahlSek bin fixed(31);
+
+   dcl BUumsatz(anzahlBU+1) type DAumsatz ctl;
+   dcl BUertrag(anzahlBU+1) type DAertrag ctl;
+   dcl Sekumsatz(anzahlBU+1,anzahlsek+1) type DAumsatz ctl;
+   dcl Sekertrag(anzahlBU+1,anzahlsek+1) type DAertrag ctl;
+
+   dcl gesamtertrag type DAertrag init(0);
+   /********************************
+   *********************************/
+   /*inputspeicher*/
+    define structure 1 memrecord,
+           2 Next  Handle memrecord,
+           2 asa char(1),
+           2 BU char(4),
+           2 Sektor char(2),
+           2 #Nr char(2),
+           2 Umsatz type DAumsatz,
+           2 Ertrag type DAertrag,
+           2 nBU bit(1) ,
+           2 nSek bit(1);
+
+    dcl 1 in_Liste based(readP),
+          2 Stufe char (1),
+          2 BU char(4),
+          2 Sektor char(2),
+          2 #Nr char(2),
+          2 Menge pic'999999999v',
+          2 Ertrag pic's99999v.999',
+          2 er char(1);
+   /********************************
+   *********************************/
+   /*outputpeicher*/
+     dcl 1 out,
+          2 asa char(1) init(' '),
+          2 i1 char(4) init('    '),
+          2 name char(8),
+          2 i2 char(11) init((11)' '),
+          2 umsatz type picumsatz,
+          2 i3 char(11) init((11)' '),
+          2 ertrag type picertrag,
+          2 i4 char(20) init((20)' ');
+    dcl 1 emission,
+          2 umsatz type DAumsatz init(0),
+          2 ertrag type DAertrag init(0);
+
+   /********************************
+   *********************************/
+   /*Hilfsvariable*/
+   dcl tempBU char(4);
+   dcl tempSektor char(2);
+   dcl tempNr char(2);
+
+   dcl tempertrag type DAertrag;
+   dcl tempumsatz type DAumsatz;
+
+   dcl ansek dec fixed(3);
+   dcl anBu dec fixed(3);
+
+   dcl i bin fixed(31);
+   dcl tmpzahlBU dec fixed(3);
+   dcl neueseite bit(1) init('0'b);
+   /********************************
+   *********************************/
+   /********************************
+      Einlesen der Stufe 1 Zeilen
+   *********************************/
+   /* Operation 1,2 */
+   open file(DDIN);
+   read file(DDIN) set (readP);
+   recordcounter+=1;
+    /**/
+   if (^eof) then do;
+      if(in_Liste.Stufe='1')then do;
+          firstH=new(:memrecord:);
+      end;
+      Else do;
+          call info('a');
+          firstH=sysnull;
+      End;
+   end;
+   else do;
+       call error('a');
+   end;
+   actual=firstH;
+   anzahlBU=0;
+   anzahlSek=0;
+   do while (^eof & in_Liste.Stufe='1');
+      tempBU=in_Liste.BU;
+      tmpzahlBU=substr(tempBU,3,2);
+      if(tmpzahlBU>anzahlBU) then do;
+          anzahlBU=tmpzahlBU;
+      end;
+      do while (^eof & in_Liste.Stufe='1' & in_Liste.BU=tempBU);
+         tempSektor=in_Liste.Sektor;
+         ansek=tempSektor;
+         if(ansek>anzahlSek) then do;
+             anzahlSek=ansek;
+         end;
+         do while (^eof & in_Liste.Stufe='1' & in_Liste.BU=tempBU &
+                tempSektor=in_Liste.Sektor);
+            tempNr=in_Liste.#Nr;
+            actual=>memrecord.BU=in_liste.BU;
+            actual=>memrecord.asa=' ';
+            actual=>memrecord.nBU='0'b;
+            actual=>memrecord.nSek='0'b;
+            actual=>memrecord.Sektor=in_liste.Sektor;
+            actual=>memrecord.#Nr=in_liste.#Nr;
+            emumsatz=0;
+            do while (^eof & in_Liste.Stufe='1' & in_Liste.BU=tempBU &
+                tempSektor=in_Liste.Sektor & tempNr=in_Liste.#Nr);
+                /* Operation 16,2 */
+                call Copyinput(actual);
+                read file(DDIN) set (readP);
+                recordcounter+=1;
+            end;
+            if(emumsatz^=0) then do;
+               call info('c');
+            end;
+            actual=>memrecord.Umsatz/=2;
+            if(^eof & in_Liste.Stufe='1') then do;
+             actual=>memrecord.next =new(:memrecord:);
+             actual=actual=>memrecord.next;
+            end;
+            else do;
+               actual=>memrecord.next =sysnull();
+            end;
+         end;
+      end;
+   end;
+   if(eof | in_Liste.Stufe^='9' ) then do;
+       call info('b');
+   End;
+   /********************************
+      Einlesen der Stufe 9 Zeilen
+   *********************************/
+   emumsatz=emission.umsatz;
+   direktumsatz=0;
+   do while (^eof& in_Liste.Stufe='9');
+      /* Operation 2 I7*/
+      tempertrag=in_liste.Ertrag;
+      tempumsatz=in_Liste.Menge;
+      emission.umsatz+=tempumsatz;
+      direktumsatz+=tempumsatz;
+      emission.ertrag+=(tempertrag*tempumsatz);
+      read file(DDIN) set (readP);
+      recordcounter+=1;
+   end;
+   emission.umsatz/=2;
+   if(emumsatz>direktumsatz) then do;
+       call info('d');
+   end;
+   /********************************
+   ********************************/
+   /********************************
+       Seitenaufteilung
+   *********************************/
+   anzahlzeilen=0;
+   alloc BUumsatz;
+   alloc Sekumsatz;
+   alloc BUertrag;
+   alloc Sekertrag;
+   BUumsatz(*)=0;
+   BUertrag(*)=0;
+   Sekumsatz(*)=0;
+   Sekertrag(*)=0;
+   actual=firstH;
+   tmphandle=firstH;
+   tempBU='';
+   tempSektor='';
+   anzahlseiten=1;
+   tmpzeilen=0;
+   do while(actual^=sysnull());
+       neueseite='0'b;
+       anzahlzeilen=3;
+       anzahlzeilen+=tmpzeilen;
+       do while(actual^=sysnull()& ^neueseite);
+           tmpzeilen=0;
+           if(actual=>memrecord.BU^=tempBU) then do;
+                if(actual=firstH) then do;
+                   anzahlzeilen+=2;
+                End;
+                Else do;
+                 if(actual=>memrecord.Sektor='00'
+                      |tmphandle=>memrecord.Sektor='00') then do;
+                    if(actual=>memrecord.Sektor='00'
+                      &tmphandle=>memrecord.Sektor='00') then do;
+                       anzahlzeilen+=5;
+                    End;
+                    Else do;
+                      if(actual=>memrecord.Sektor='00') then do;
+                         anzahlzeilen+=9;
+                      End;
+                      Else do;
+                         anzahlzeilen+=6;
+                      End;
+                    End;
+                 end;
+                 else do;
+                       anzahlzeilen+=10; /*ts 4 Tb 3, üBuis 2, üsek 1 */
+                 end;
+                End;
+                actual=>memrecord.nBU='1'b;
+                actual=>memrecord.nSek='1'b;
+                if(anzahlzeilen>maxzeilen) then do;
+                  if(anzahlzeilen-3>maxzeilen) then do;
+                       tmphandle=>memrecord.asa='1';
+                       neueseite='1'b;
+                       tmpzeilen+=10;
+                  end;
+                  else do;
+                       actual=>memrecord.asa='1';
+                       neueseite='1'b;
+                       tmpzeilen+=3;
+                  end;
+                  anzahlseiten+=1;
+                end;
+           end;
+           else do;
+             if(actual=>memrecord.Sektor^=tempSektor) then do;
+                anzahlzeilen+=5; /*ts 4 üsek 1 */
+                actual=>memrecord.nSek='1'b;
+                if(anzahlzeilen>maxzeilen) then do;
+                  if(anzahlzeilen-1>maxzeilen) then do;
+                       tmphandle=>memrecord.asa='1';
+                       neueseite='1'b;
+                       tmpzeilen+=5;
+                  end;
+                  else do;
+                       actual=>memrecord.asa='1';
+                       neueseite='1'b;
+                       tmpzeilen+=1;
+                  end;
+                  anzahlseiten+=1;
+                end;
+              end;
+           end;
+           if(neueseite) then do;
+                tmpzeilen+=1;
+           end;
+           else do;
+                anzahlzeilen+=1;
+           end;
+           if(^neueseite & anzahlzeilen>maxzeilen) then do;
+               actual=>memrecord.asa='1';
+               neueseite='1'b;
+               tmpzeilen+=1;
+               anzahlseiten+=1;
+           end;
+
+           ansek=actual=>memrecord.sektor;
+           anBu=substr(actual=>memrecord.BU,3,2);
+           BUumsatz(anBU+1)+=actual=>memrecord.umsatz;
+           BUErtrag(anBU+1)+=actual=>memrecord.ertrag;
+           Sekumsatz(anBu+1,ansek+1)+=actual=>memrecord.umsatz;
+           Sekertrag(anBu+1,ansek+1)+=actual=>memrecord.ertrag;
+           tempBU=actual=>memrecord.BU;
+           tempSektor=actual=>memrecord.Sektor;
+           tmphandle=actual;
+           actual=actual=>memrecord.next;
+       end;
+   End;
+   if(anzahlzeilen+11>maxzeilen & firsth^=sysnull()) then do;
+      tmphandle=>memrecord.asa='1';
+      anzahlseiten+=1;
+   End;
+   /* Operation 3 I4 */
+   /********************************
+   *********************************/
+   /********************************
+          Ausgabe Stufe 1
+   *********************************/
+   open file(DDOUT2);
+   tmpseiten=1;
+   actual=firsth;
+   if(firsth^=sysnull()) then do;
+       firsth=>memrecord.asa='1';
+   end;
+   tmphandle=actual;
+   do while (actual^=sysnull());
+      if(actual=>memrecord.asa='1') then do; /* Neue Seite actual */
+         if(actual^=firstH&actual=>memrecord.nBU    /*  Neues BU */
+                &actual=>memrecord.nSek) then do;   /* Neuer Sektor*/
+             call printAnlagestrich(tmphandle=>memrecord.umsatz
+                ,tmphandle=>memrecord.ertrag);
+             if(tmphandle=>memrecord.Sektor^='00') then do;
+                ansek=tmphandle=>memrecord.sektor;
+                anBu=substr(tmphandle=>memrecord.BU,3,2);
+                call printSTotal(tmphandle=>memrecord.Sektor
+                ,Sekumsatz(anBu+1,ansek+1),Sekertrag(anBu+1,ansek+1));
+             End;
+             call printBTotal(substr(tmphandle=>memrecord.BU,3,2)
+                ,BUumsatz(anBU+1),BUErtrag(anBU+1));
+         end;
+         if((actual^=firstH&actual=>memrecord.nSek /* Neuer Sektor */
+             & ^actual=>memrecord.nBU)) then do;
+             call printAnlagestrich(tmphandle=>memrecord.umsatz
+                ,tmphandle=>memrecord.ertrag);
+             if(   tmphandle=>memrecord.Sektor^='00') then do;
+              ansek=tmphandle=>memrecord.sektor;
+                anBu=substr(tmphandle=>memrecord.BU,3,2);
+              call printSTotal(tmphandle=>memrecord.Sektor
+                ,Sekumsatz(anBu+1,ansek+1),Sekertrag(anBu+1,ansek+1));
+              end;
+         end;
+         call printkopf(tmpseiten,anzahlseiten);
+         tmpseiten+=1;
+         actual=>memrecord.asa=' ';
+         ansek=actual=>memrecord.sektor;
+         anBu=substr(actual=>memrecord.BU,3,2);
+         if(^actual=>memrecord.nSek & ^actual=>memrecord.nBU) then do;
+               call Writeoutput(actual);
+         end;
+         if(actual=>memrecord.nBU) then do;
+             call printBUeber('1',substr(actual=>memrecord.BU,3,2));
+             if(actual=>memrecord.Sektor^='00') then do;
+                call printSUeber(' ',actual=>memrecord.Sektor);
+             End;
+             call Writeoutput(actual);
+         end;
+         if(actual=>memrecord.nSek&^actual=>memrecord.nBU) then do;
+             if(actual=>memrecord.Sektor^='00') then do;
+                call printSUeber('1',actual=>memrecord.Sektor);
+             End;
+             call Writeoutput(actual);
+         end;
+      end;
+      else do;       /*keine neue Seite*/
+       if(actual=>memrecord.nBU) then do;  /* neue BU*/
+          ansek=tmphandle=>memrecord.sektor;
+          anBu=substr(tmphandle=>memrecord.BU,3,2);
+          if(actual^=firstH) then do;
+             call printAnlagestrich(tmphandle=>memrecord.umsatz
+                ,tmphandle=>memrecord.ertrag);
+             if(tmphandle=>memrecord.Sektor^='00') then do;
+                call printSTotal(tmphandle=>memrecord.Sektor
+                  ,Sekumsatz(anBu+1,ansek+1),Sekertrag(anBu+1,ansek+1));
+             End;
+             call printBTotal(substr(tmphandle=>memrecord.BU,3,2)
+                ,BUumsatz(anBU+1),BUErtrag(anBU+1));
+          end;
+          call printBUeber(' ',substr(actual=>memrecord.BU,3,2));
+          if(actual=>memrecord.Sektor^='00') then do;
+             call printSUeber(' ',actual=>memrecord.Sektor);
+          End;
+          call Writeoutput(actual);
+       end;
+                                          /* neuer Sektor*/
+       if(actual=>memrecord.nSek&^actual=>memrecord.nBU) then do;
+          ansek=tmphandle=>memrecord.sektor;
+          anBu=substr(tmphandle=>memrecord.BU,3,2);
+          call PrintAnlageStrich(tmphandle=>memrecord.umsatz
+                ,tmphandle=>memrecord.ertrag);
+          if(actual^=firstH&tmphandle=>memrecord.Sektor^='00') then do;
+             call printSTotal(tmphandle=>memrecord.Sektor
+                ,Sekumsatz(anBu+1,ansek+1),Sekertrag(anBu+1,ansek+1));
+          end;
+          call printSUeber(' ',actual=>memrecord.Sektor);
+          call Writeoutput(actual);
+       end;
+       if(^actual=>memrecord.nSek&^actual=>memrecord.nBU) then do;
+          call Writeoutput(actual);
+       end;
+      end;
+      tmphandle=actual;
+      actual=actual=>memrecord.next;
+   end;
+   if(tmphandle^=firstH & firstH^=sysnull()) then do;
+       call printAnlagestrich(tmphandle=>memrecord.umsatz
+                ,tmphandle=>memrecord.ertrag);
+       ansek=tmphandle=>memrecord.sektor;
+       anBu=substr(tmphandle=>memrecord.BU,3,2);
+       call printSTotal(tmphandle=>memrecord.Sektor
+            ,Sekumsatz(anBu+1,ansek+1),Sekertrag(anBu+1,ansek+1));
+       call printBTotal(substr(tmphandle=>memrecord.BU,3,2)
+           ,BUumsatz(anBU+1),BUErtrag(anBU+1));
+   end;
+   else do;
+       call printkopf(tmpseiten,anzahlseiten);
+   end;
+   call printEmission;
+   gesamtertrag+=emission.ertrag;
+   do i=1 to anBU+1;
+      gesamtertrag+=Buertrag(i);
+   end;
+   call printFuss(gesamtertrag);
+   /* Operation 17,9 */
+   /* Operation 10 */
+   close file(DDOUT2);
+
+
+  /********************************
+   ********************************
+         Ausgabe Subroutinen
+   ********************************
+   ********************************/
+
+  /********************************
+                 Kopf
+   ********************************/
+
+   Printkopf: proc($SNR,$SMAX);
+    dcl $SNR dec fixed(3);
+    dcl $SMAX dec fixed(3);
+
+    titelzeile1.datum=translate('ef.cd.20ab',date,'abcdef');
+    titelzeile1.SeitenNr=$snr;
+    titelzeile1.SeitenMax=$smax;
+    write file(DDOUT2) from (titelzeile1);
+    write file(DDOUT2) from (strich);
+    write file(DDOUT2) from (Legende);
+   end Printkopf;
+
+  /********************************
+        Business Überschrift
+   ********************************/
+   PrintBUeber:proc($asa,$nr);
+    dcl $nr char(2);
+    dcl $asa char(1);
+    bbue.asa=$asa;
+    bbue.nr=$nr;
+    write file(DDOUT2) from(bbue);
+   End PrintBUeber;
+
+  /********************************
+        Sektor Überschrift
+   ********************************/
+   PrintSUeber:proc($asa,$nr);
+    dcl $nr char(2);
+    dcl $asa char(1);
+
+    bsue.asa=$asa;
+    bsue.nr=$nr;
+    write file(DDOUT2) from(bsue);
+   End PrintSUeber;
+
+  /********************************
+       Anlageberater Strichzeile
+   ********************************/
+   PrintAnlageStrich:proc($umsatz,$ertrag);
+    dcl $umsatz type DAumsatz;
+    dcl $ertrag type DAertrag;
+    dcl umsatz type picumsatz;
+    dcl ertrag type picertrag;
+    umsatz=$umsatz;
+    ertrag=$ertrag;
+
+    anstrich.strich=translate(umsatz,'--------------'
+          ,'+-,.0123456789');
+    anstrich.strich2=translate(ertrag,'--------------'
+          ,'+-,.0123456789');
+    write file(DDOUT2) from(anstrich);
+   End PrintAnlageStrich;
+
+  /********************************
+        Sektor Total
+   ********************************/
+   PrintSTotal:proc($nr,$umsatztot,$ertragtot);
+    dcl $umsatztot dec fixed (11,2);
+    dcl $ertragtot dec fixed (11,3);
+    dcl $nr char(2);
+
+    bstot.ertragtot=$ertragtot;
+    bstot.umsatztot=$umsatztot;
+    bstot.nr=$nr;
+    stotstrich.strich1=translate(bstot.umsatztot,'=============='
+          ,'+-,.0123456789');
+    stotstrich.strich2=translate(bstot.ertragtot,'=============='
+          ,'+-,.0123456789');
+    write file(DDOUT2) from(bstot);
+    write file(DDOUT2) from(stotstrich);
+   End PrintSTotal;
+
+  /********************************
+       Business Total
+   ********************************/
+   PrintBTotal:proc($nr,$umsatztot,$ertragtot);
+    dcl $umsatztot dec fixed (11,2);
+    dcl $ertragtot dec fixed (11,3);
+    dcl $nr char(2);
+
+    bbtot.ertragtot=$ertragtot;
+    bbtot.umsatztot=$umsatztot;
+    bbtot.nr=$nr;
+    btotstrich.strich1=translate(bbtot.umsatztot,'=============='
+          ,'+-,.0123456789');
+    btotstrich.strich2=translate(bbtot.ertragtot,'=============='
+          ,'+-,.0123456789');
+    write file(DDOUT2) from(bbtot);
+    write file(DDOUT2) from(btotstrich);
+   End PrintBTotal;
+
+  /********************************
+        Emission Total
+   ********************************/
+   printEmission:proc;
+    emiout.umsatz=emission.umsatz;
+    emiout.ertrag=emission.ertrag;
+    write file(DDOUT2) from(emiout);
+   end PrintEmission;
+
+
+  /********************************
+         Fusszeilen
+   ********************************/
+   PrintFuss: proc($gesamt);
+    dcl $gesamt dec fixed(11,3);
+
+    Fusszeile.ertrag=$gesamt;
+    write file(DDOUT2) from (strichfuss);
+    write file(DDOUT2) from (Fusszeile);
+    substr(strichfuss,1,1)=' ';
+    write file(DDOUT2) from (strichfuss);
+   end PrintFuss;
+
+ /*********************************
+  *********************************
+         Hilfsfunktionen
+  *********************************
+  *********************************/
+
+  Copyinput: proc($inhandle);
+    dcl $inhandle handle memrecord;
+    dcl tmpchar char(10) init('');
+    dcl tmpchar2 char(12) init('');;
+    tmpchar=in_liste.Ertrag;
+    tmpchar2=in_liste.Menge;
+    in_liste.Ertrag=tmpchar;
+    in_liste.Menge=tmpchar2;
+    tempertrag=in_liste.Ertrag;
+    tempumsatz=in_Liste.Menge;
+    $inhandle=>memrecord.Umsatz+=tempumsatz;
+    $inhandle=>memrecord.Ertrag+=(tempertrag*tempumsatz);
+    if(in_liste.er='e') then do;
+        emission.umsatz+=tempumsatz;
+        emission.ertrag-=(tempertrag*tempumsatz);
+        emumsatz+=tempumsatz;
+    end;
+    else do;
+        emumsatz-=tempumsatz;
+    end;
+  end Copyinput;
+
+
+  Writeoutput:proc($inhandle);
+    dcl $inhandle handle memrecord;
+    out.name=$inhandle=>memrecord.BU||$inhandle=>memrecord.Sektor
+             ||$inhandle=>memrecord.#Nr;
+    out.umsatz=$inhandle=>memrecord.umsatz;
+    out.ertrag=$inhandle=>memrecord.ertrag;
+    write file(DDOUT2) from(out);
+    out='';
+   End Writeoutput;
+
+  /********************************
+   ********************************
+       Info & Error Subroutinen
+   ********************************
+   ********************************/
+  Info:proc($e);
+   dcl $e char(1);
+   select ($e) ;
+    when ('a') do;
+       put("Info: file DDIN contains no 'Stufe 1' record") skip;
+    end;
+    when ('b') do;
+       put("Info: file DDIN contains no 'Stufe 9' record") skip;
+    end;
+    when ('c') do;
+      if(emumsatz<0) then
+       put("Info: "||tempBU||tempSektor||TempNr||
+       ': Stocks: More disposition'|| emumsatz) skip;
+       else
+          put("Info: "||tempBU||tempSektor||TempNr||
+          ': Stocks: More acquisition'|| emumsatz) skip;
+    end;
+    when ('d') do;
+         put("Info: : Emission trading: Stocks: values corrupted") skip;
+    end;
+    otherwise do;
+       put("Info: Unidentified Info Code") skip;
+    end;
+   End;
+  End Info;
+
+  Error:proc($e);
+   dcl $e char(1);
+   select ($e) ;
+    when ('a') do;
+       put('Error: file DDIN is empty') skip;
+    end;
+    when ('b') do;
+       put('Error: file DDIN is damaged on line'||recordcounter) skip;
+    end;
+    when ('') do;
+
+    end;
+    when ('') do;
+
+    end;
+    otherwise do;
+       put("Error: Unidentified Error Code") skip;
+    end;
+   END;
+   SIGNAL ERROR;
+  End Error;
+ End  AG7010 ;
